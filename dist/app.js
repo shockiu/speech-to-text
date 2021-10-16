@@ -59,11 +59,11 @@ var listen = function () {
 var routes = function () {
     app.post('/V1-thomas-speech', function (req, response_) {
         var audioBase64 = req.body.audioBase64;
-        (0, exports.writeFile)(audioBase64).then(function (res) {
-            console.log(res);
+        (0, exports.writeFile)(audioBase64).then(function (resFile) {
+            console.log(resFile);
             speechToText.recognize({
                 contentType: 'audio/ogg',
-                audio: fs_1.default.createReadStream('speech/' + res.path),
+                audio: fs_1.default.createReadStream('speech/' + resFile.path),
                 model: 'es-MX_NarrowbandModel'
             }).then(function (res) {
                 var response = res.result.results;
@@ -76,6 +76,11 @@ var routes = function () {
                 });
                 response_.send({
                     msg: trasncript
+                });
+                fs_1.default.unlink('speech/' + resFile.path, function (err) {
+                    if (err)
+                        throw err;
+                    console.log('ELIMINADO');
                 });
             });
         });
