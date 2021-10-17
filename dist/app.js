@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SERVER = exports.writeFile = void 0;
+exports.SERVER = void 0;
 require('dotenv').config();
 var fs_1 = __importDefault(require("fs"));
 var express_1 = __importDefault(require("express"));
@@ -21,22 +21,84 @@ var speechToText = new v1_1.default({
     }),
     serviceUrl: "" + SPEECHURL
 });
-var writeFile = function (base64) {
+/**
+ *
+ * @param base64
+ * @param extension
+ * @param nameFile
+ * @returns
+ */
+var listMimeTypeAndExtension = [
+    { mimeType: 'audio/ogg', extencion: '.oga' },
+    { mimeType: 'audio/webm', extencion: '.weba' },
+    { mimeType: 'audio/basic', extencion: '.au' },
+    { mimeType: 'audio/mpeg', extencion: '.mp3' },
+    { mimeType: 'audio/flac', extencion: '.flac' },
+    { mimeType: 'audio/wav', extencion: '.wav' }
+];
+var getFileExtension = function (mimeType) {
+    return listMimeTypeAndExtension.find(function (file) { return file.mimeType === mimeType; });
+};
+var writeFile = function (base64, extension, nameFile) {
+    if (nameFile === void 0) { nameFile = 'audio-transcrip'; }
     return new Promise(function (response, reject) {
-        var base64String = base64;
-        var namePath = 'audio-prueba.oga';
-        base64String = base64String.split(';base64,').pop();
-        fs_1.default.writeFile('speech/' + namePath, base64String, { encoding: 'base64' }, function (err) {
-            if (err) {
-                console.error(err);
-                reject(false);
+        if (base64 === null || base64 === undefined || base64.length < 1) {
+            response({ exit: true });
+            return;
+        }
+        else if (extension === null || extension === undefined || extension.length < 1) {
+            response({ exit: true });
+            return;
+        }
+        else {
+            var base64String = base64;
+            var dotExtencion = getFileExtension(extension) === undefined ? false : getFileExtension(extension).extencion;
+            if (dotExtencion === false) {
+                response({ exit: true });
+                return;
             }
-            console.log('file saved to ');
-            response({ created: true, path: namePath });
-        });
+            var namePath_1 = "" + nameFile + dotExtencion;
+            base64String = base64String.split(';base64,').pop();
+            fs_1.default.writeFile('speech/' + namePath_1, base64String, { encoding: 'base64' }, function (err) {
+                if (err) {
+                    console.error(err);
+                    reject(false);
+                }
+                console.log(chalk_1.default.green('DOCUMENTO GUARDADO'));
+                response({ created: true, path: namePath_1 });
+            });
+        }
     });
 };
-exports.writeFile = writeFile;
+/**
+ *
+ * @param path
+ * @param mimeType
+ * @returns
+ */
+var proccesTranscript = function (path, mimeType) {
+    if (mimeType === void 0) { mimeType = 'audio/ogg'; }
+    return new Promise(function (resolve, reject) {
+        speechToText.recognize({
+            contentType: mimeType,
+            audio: fs_1.default.createReadStream('speech/' + path),
+            model: 'es-MX_NarrowbandModel'
+        }).then(function (res) {
+            console.log(chalk_1.default.blueBright('TRANSCRIPCION OBTENIDA'));
+            var response = res.result.results;
+            var trasncript = '';
+            response.forEach(function (speech) {
+                speech.alternatives.forEach(function (msg) {
+                    trasncript = trasncript + " " + msg.transcript;
+                });
+            });
+            resolve(trasncript);
+        }).catch(function (err) { return reject(err); });
+    });
+};
+/**
+ *  SERVER INIT
+ */
 var SERVER = function () {
     middlewares();
     routes();
@@ -46,42 +108,41 @@ exports.SERVER = SERVER;
 var middlewares = function () {
     // middlewares
     app.use(express_1.default.json({ limit: '20mb' }));
+    // LIMIT 20 MB
     app.use((0, cors_1.default)());
-    /**
-     * LIMITE DE 20MB por base 64
-     */
 };
 var listen = function () {
     app.listen(PORT, function () {
-        console.log(chalk_1.default.blue.bgYellow("SERVER ON PORT " + PORT));
+        console.log(chalk_1.default.blue("SERVER ON PORT " + PORT));
     });
 };
 var routes = function () {
-    app.post('/V1-thomas-speech', function (req, response_) {
-        var audioBase64 = req.body.audioBase64;
-        (0, exports.writeFile)(audioBase64).then(function (resFile) {
-            console.log(resFile);
-            speechToText.recognize({
-                contentType: 'audio/ogg',
-                audio: fs_1.default.createReadStream('speech/' + resFile.path),
-                model: 'es-MX_NarrowbandModel'
-            }).then(function (res) {
-                var response = res.result.results;
-                var trasncript = '';
-                response.forEach(function (speech) {
-                    console.log(speech.alternatives);
-                    speech.alternatives.forEach(function (msg) {
-                        trasncript = trasncript + " " + msg.transcript;
-                    });
+    app.post('/thomas-speech', function (req, res) {
+        var _a = req.body, audioBase64 = _a.audioBase64, mimeType = _a.mimeType;
+        writeFile(audioBase64, mimeType).then(function (resFile) {
+            if (resFile.exit) {
+                res.send({
+                    msg: 'DATO ERRONEO'
                 });
-                response_.send({
+                return;
+            }
+            proccesTranscript(resFile.path, mimeType).then(function (trasncript) {
+                res.send({
                     msg: trasncript
                 });
                 fs_1.default.unlink('speech/' + resFile.path, function (err) {
                     if (err)
                         throw err;
-                    console.log('ELIMINADO');
+                    console.log(chalk_1.default.red('ELIMINADO'));
                 });
+            }).catch(function (err) {
+                res.send({
+                    err: err
+                });
+            });
+        }).catch(function (err) {
+            res.send({
+                err: err
             });
         });
     });
