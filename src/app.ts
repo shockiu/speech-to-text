@@ -1,21 +1,43 @@
 require('dotenv').config();
 import fs from 'fs';
-import express, { Application, Request, Response } from 'express';
+import express, { Application, NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import SpeechToTextV1  from 'ibm-watson/speech-to-text/v1';
+import TextToSpeechV1 from 'ibm-watson/text-to-speech/v1';
 import { IamAuthenticator } from 'ibm-watson/auth';
 import chalk from 'chalk';
 
+// API KEY SPEECH
 const APIKEYSPEECH  = process.env.SPEECH_TO_TEXT_IAM_APIKEY;
 const SPEECHURL = process.env.SPEECH_TO_TEXT_URL;
+
+// API KEY TEXT
+const APIKEYTEXT = process.env.TEXT_TO_SPEECH_IAM_APIKEY;
+const TEXTURL = process.env.TEXT_TO_SPEECH_URL;
+
 const PORT = process.env.PORT || '9999';
 const app: Application = express();
+
+const iamAuthenticatorSpeech = new IamAuthenticator({
+    apikey: APIKEYSPEECH
+});
+
 const speechToText =  new SpeechToTextV1({
-    authenticator: new IamAuthenticator({
-        apikey: APIKEYSPEECH
-    }),
+    authenticator: iamAuthenticatorSpeech,
     serviceUrl: `${SPEECHURL}`
 });
+
+
+const textToSpeech = new TextToSpeechV1({
+    authenticator: new IamAuthenticator({
+        apikey: APIKEYTEXT
+    }),
+    serviceUrl: `${TEXTURL}`
+});
+
+
+
+
 
 /**
  * 
@@ -122,6 +144,7 @@ const listen = () => {
 } 
 
 const routes = () => {
+    
     app.post('/thomas-speech', (req: Request, res: Response) => {
         let { audioBase64 , mimeType } =  req.body;
         writeFile(audioBase64, mimeType).then((resFile) => {
@@ -150,8 +173,33 @@ const routes = () => {
             });
         });
     });
+
+    app.post('/thomas-text',  (req: Request, res: Response)=> {
+        const { msg } = req.body;
+        textToSpeech.synthesize({
+            text: msg,
+            voice: 'es-ES_EnriqueV3Voice',
+            accept: 'audio/ogg'
+        }).then(async (response)=> {
+            let bufs = [];
+            let result;
+            response.result.on('data', (data) => {
+                bufs.push(data);
+            });
+            response.result.on('end', () => {
+              result = Buffer.concat(bufs);
+              fs.writeFileSync('text/audioprueba.ogg', result);
+              fs.readFile('text/audioprueba.ogg', {encoding: 'base64'}, (err, data: string) => {
+                if(err) throw err;
+                // EL BASE 64 SIN LA URI
+                console.log(data);
+                res.send({
+                    msg: data
+                })
+              })
+                
+            });
+            
+        })
+    })    
 }
-
-
-
-
