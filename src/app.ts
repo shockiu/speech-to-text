@@ -36,31 +36,7 @@ const textToSpeech = new TextToSpeechV1({
 });
 
 
-
-
-
-/**
- * 
- * @param base64 
- * @param extension 
- * @param nameFile 
- * @returns 
- */
-
-const listMimeTypeAndExtension = [
-    { mimeType: 'audio/ogg', extencion: '.oga' },
-    { mimeType: 'audio/webm', extencion: '.weba' },
-    { mimeType: 'audio/basic', extencion: '.au' },
-    { mimeType: 'audio/mpeg', extencion: '.mp3' },
-    { mimeType: 'audio/flac', extencion: '.flac' },
-    { mimeType: 'audio/wav', extencion: '.wav' }
-];
-
-const getFileExtension = (mimeType: string) => {
-    return listMimeTypeAndExtension.find((file) => file.mimeType === mimeType);
-}
-
-const writeFile = (base64: string, extension: string, nameFile: string = 'audio-transcrip'): Promise<any> => {
+const createBuffer = (base64: string, extension: string, nameFile: string = 'audio-transcrip'): Promise<any> => {
     return new Promise<any>((response, reject) => {
         if( base64 === null || base64 === undefined || base64.length < 1 ) {
             response({ exit: true});
@@ -69,24 +45,15 @@ const writeFile = (base64: string, extension: string, nameFile: string = 'audio-
             response({ exit: true});
             return;
         } else {
-            let base64String = base64;
-            let dotExtencion = getFileExtension(extension) === undefined ? false : getFileExtension(extension).extencion;
-
-            if( dotExtencion === false ) {
-                response({ exit: true });
-                return;
+            try {
+                let index = base64.indexOf(',');
+                let base64String = base64.slice(index + 1);
+                let bufferData  = Buffer.from(base64String, 'base64');
+                console.log(chalk.green('BUFFER CREADO'));
+                response({created:true, buffer: bufferData});
+            } catch (error) {
+                reject(error);
             }
-
-            let namePath = `${nameFile}${dotExtencion}`;
-            base64String =  base64String.split(';base64,').pop();
-            fs.writeFile('speech/'+namePath, base64String,  { encoding: 'base64' } , (err) => {
-            if (err) {
-                console.error(err);
-                reject(false);
-            }
-            console.log(chalk.green('DOCUMENTO GUARDADO'));
-            response({created:true, path: namePath});
-            });
         }
     });
 }
@@ -99,11 +66,11 @@ const writeFile = (base64: string, extension: string, nameFile: string = 'audio-
  * @returns 
  */
 
-const proccesTranscript = (path: string, mimeType: string = 'audio/ogg'): Promise<string> => {
+const proccesTranscript = (dataBuffer: Buffer, mimeType: string = 'audio/ogg'): Promise<string> => {
     return new Promise<string>((resolve, reject) => {
         speechToText.recognize({ 
             contentType: mimeType, 
-            audio: fs.createReadStream('speech/'+path),
+            audio: dataBuffer,
             model : 'es-MX_NarrowbandModel'
             }).then((res) => {
             console.log(chalk.blueBright('TRANSCRIPCION OBTENIDA'));
@@ -147,20 +114,16 @@ const routes = () => {
     
     app.post('/thomas-speech', (req: Request, res: Response) => {
         let { audioBase64 , mimeType } =  req.body;
-        writeFile(audioBase64, mimeType).then((resFile) => {
+        createBuffer(audioBase64, mimeType).then((resFile) => {
             if( resFile.exit  ) {
                 res.send({
                     msg:'DATO ERRONEO'
                 });
                 return;
             }
-            proccesTranscript(resFile.path, mimeType).then((trasncript)=> {
+            proccesTranscript(resFile.buffer, mimeType).then((trasncript)=> {
                 res.send({
                     msg: trasncript
-                });
-                fs.unlink('speech/'+resFile.path, (err) => {
-                    if(err) throw err;
-                    console.log(chalk.red('ELIMINADO'));
                 });
             }).catch((err) => {
                 res.send({
@@ -188,16 +151,10 @@ const routes = () => {
             });
             response.result.on('end', () => {
               result = Buffer.concat(bufs);
-              fs.writeFileSync('text/audioprueba.ogg', result);
-              fs.readFile('text/audioprueba.ogg', {encoding: 'base64'}, (err, data: string) => {
-                if(err) throw err;
-                // EL BASE 64 SIN LA URI
-                console.log(data);
-                res.send({
-                    msg: data
-                })
-              })
-                
+              let base64 = result.toString('base64');
+              res.send({
+                  msg: 'data:audio/ogg;base64,'+base64
+              });
             });
             
         })

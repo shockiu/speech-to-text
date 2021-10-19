@@ -41,7 +41,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SERVER = void 0;
 require('dotenv').config();
-var fs_1 = __importDefault(require("fs"));
 var express_1 = __importDefault(require("express"));
 var cors_1 = __importDefault(require("cors"));
 var v1_1 = __importDefault(require("ibm-watson/speech-to-text/v1"));
@@ -69,25 +68,7 @@ var textToSpeech = new v1_2.default({
     }),
     serviceUrl: "" + TEXTURL
 });
-/**
- *
- * @param base64
- * @param extension
- * @param nameFile
- * @returns
- */
-var listMimeTypeAndExtension = [
-    { mimeType: 'audio/ogg', extencion: '.oga' },
-    { mimeType: 'audio/webm', extencion: '.weba' },
-    { mimeType: 'audio/basic', extencion: '.au' },
-    { mimeType: 'audio/mpeg', extencion: '.mp3' },
-    { mimeType: 'audio/flac', extencion: '.flac' },
-    { mimeType: 'audio/wav', extencion: '.wav' }
-];
-var getFileExtension = function (mimeType) {
-    return listMimeTypeAndExtension.find(function (file) { return file.mimeType === mimeType; });
-};
-var writeFile = function (base64, extension, nameFile) {
+var createBuffer = function (base64, extension, nameFile) {
     if (nameFile === void 0) { nameFile = 'audio-transcrip'; }
     return new Promise(function (response, reject) {
         if (base64 === null || base64 === undefined || base64.length < 1) {
@@ -99,22 +80,16 @@ var writeFile = function (base64, extension, nameFile) {
             return;
         }
         else {
-            var base64String = base64;
-            var dotExtencion = getFileExtension(extension) === undefined ? false : getFileExtension(extension).extencion;
-            if (dotExtencion === false) {
-                response({ exit: true });
-                return;
+            try {
+                var index = base64.indexOf(',');
+                var base64String = base64.slice(index + 1);
+                var bufferData = Buffer.from(base64String, 'base64');
+                console.log(chalk_1.default.green('BUFFER CREADO'));
+                response({ created: true, buffer: bufferData });
             }
-            var namePath_1 = "" + nameFile + dotExtencion;
-            base64String = base64String.split(';base64,').pop();
-            fs_1.default.writeFile('speech/' + namePath_1, base64String, { encoding: 'base64' }, function (err) {
-                if (err) {
-                    console.error(err);
-                    reject(false);
-                }
-                console.log(chalk_1.default.green('DOCUMENTO GUARDADO'));
-                response({ created: true, path: namePath_1 });
-            });
+            catch (error) {
+                reject(error);
+            }
         }
     });
 };
@@ -124,12 +99,12 @@ var writeFile = function (base64, extension, nameFile) {
  * @param mimeType
  * @returns
  */
-var proccesTranscript = function (path, mimeType) {
+var proccesTranscript = function (dataBuffer, mimeType) {
     if (mimeType === void 0) { mimeType = 'audio/ogg'; }
     return new Promise(function (resolve, reject) {
         speechToText.recognize({
             contentType: mimeType,
-            audio: fs_1.default.createReadStream('speech/' + path),
+            audio: dataBuffer,
             model: 'es-MX_NarrowbandModel'
         }).then(function (res) {
             console.log(chalk_1.default.blueBright('TRANSCRIPCION OBTENIDA'));
@@ -165,6 +140,30 @@ var listen = function () {
     });
 };
 var routes = function () {
+    app.post('/thomas-speech', function (req, res) {
+        var _a = req.body, audioBase64 = _a.audioBase64, mimeType = _a.mimeType;
+        createBuffer(audioBase64, mimeType).then(function (resFile) {
+            if (resFile.exit) {
+                res.send({
+                    msg: 'DATO ERRONEO'
+                });
+                return;
+            }
+            proccesTranscript(resFile.buffer, mimeType).then(function (trasncript) {
+                res.send({
+                    msg: trasncript
+                });
+            }).catch(function (err) {
+                res.send({
+                    err: err
+                });
+            });
+        }).catch(function (err) {
+            res.send({
+                err: err
+            });
+        });
+    });
     app.post('/thomas-text', function (req, res) {
         var msg = req.body.msg;
         textToSpeech.synthesize({
@@ -180,15 +179,9 @@ var routes = function () {
                 });
                 response.result.on('end', function () {
                     result = Buffer.concat(bufs);
-                    fs_1.default.writeFileSync('text/audioprueba.ogg', result);
-                    fs_1.default.readFile('text/audioprueba.ogg', { encoding: 'base64' }, function (err, data) {
-                        if (err)
-                            throw err;
-                        // EL BASE 64 SIN LA URI
-                        console.log(data);
-                        res.send({
-                            msg: data
-                        });
+                    var base64 = result.toString('base64');
+                    res.send({
+                        msg: 'data:audio/ogg;base64,' + base64
                     });
                 });
                 return [2 /*return*/];
